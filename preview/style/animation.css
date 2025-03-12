@@ -1,0 +1,40 @@
+
+.oscillate-10 {
+    display: inline-block;
+    animation: oscillate-10 2s infinite ease-in-out;
+}
+
+.oscillate-5 {
+    display: inline-block;
+    animation: oscillate-5 2s infinite ease-in-out;
+}
+
+@keyframes oscillate-10 {
+    0% { transform: translateX(-10px); }
+    50% { transform: translateX(10px); }
+    100% { transform: translateX(-10px); }
+}
+
+
+@keyframes oscillate-5 {
+    0% { transform: translateX(-5px); }
+    50% { transform: translateX(5px); }
+    100% { transform: translateX(-5px); }
+}
+
+.blink {
+    animation: blink-animation 1s steps(5, start) infinite;
+    -webkit-animation: blink-animation 1s steps(5, start) infinite;
+}
+
+@keyframes blink-animation {
+    to {
+        visibility: hidden;
+    }
+}
+
+@-webkit-keyframes blink-animation {
+    to {
+        visibility: hidden;
+    }
+}

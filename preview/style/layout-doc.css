@@ -1,0 +1,64 @@
+@import url('navbar.css');
+
+.heading-block {
+    color: var(--black-cyan)
+}
+
+.heading-block, .section-block {
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    padding-left: 100px;
+    padding-right: 100px;
+}
+
+.section-block {
+    position: relative;
+    padding-bottom: 5em;
+}
+
+.section-block:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 0;
+    height: 1.5px;
+    width: 60%;
+    background: var(--light-gray);
+}
+
+.heading-block h1 {
+    font-size: 3em;
+}
+
+.dateline {
+    color: var(--caption-gray)
+}
+
+img {
+    width: 50vw;
+}
+
+blockquote {
+    position: relative;
+    margin: 1em 0;
+    padding: 1em 2em;
+    border-radius: 4px;
+    color: #333;  /* Adjust text color */
+}
+
+blockquote::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: var(--caption-gray);
+}
+
+blockquote p {
+    margin: 0;
+    color: var(--caption-gray);
+}

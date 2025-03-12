@@ -1,0 +1,21 @@
+.navbar {
+    display: block;
+    justify-content: space-around;
+    align-items: center;
+    padding: 20px;
+    background-color: var(--black-cyan);
+}
+
+
+.navbar a {
+    color: white;
+    position: relative;
+    padding: 0 1rem;
+    text-decoration: none;
+    transition: text-decoration 0.1s ease-in-out, color 0.1s ease-in-out;
+}
+
+.navbar a:hover {
+    color: var(--light-cyan);
+    text-decoration: underline;
+}
