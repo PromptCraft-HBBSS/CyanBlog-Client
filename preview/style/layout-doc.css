@@ -36,8 +36,20 @@
     color: var(--caption-gray)
 }
 
-img {
-    width: 50vw;
+
+.section-block img {
+    height: 50vh;
+    display: block;
+    margin: 0 auto;
+}
+
+.section-block img::after {
+    content: attr(alt); /* Use the alt text as the caption */
+    display: block;
+    text-align: center;
+    font-size: 14px;
+    color: gray;
+    margin-top: 5px;
 }
 
 blockquote {

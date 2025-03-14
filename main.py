@@ -1,6 +1,5 @@
 #!/opt/anaconda3/envs/cyan-client/bin/python
 import random
-import readline  # For history and autocomplete support
 import os
 import re
 import json
@@ -61,11 +60,15 @@ class ObservablePointer:
 
 # Create observable pointer with initial value as today's date.
 pointer = ObservablePointer(datetime.datetime.today().strftime('%Y-%m-%d'))
-
-# Setup Readline
-readline.set_history_length(1000)
-readline.parse_and_bind('tab: complete')
-# readline.parse_and_bind("stty erase ^H")
+def send_heartbeat():
+    while True:
+        try:
+            response = requests.post(f"{NODE_SERVER_URL}/heartbeat")
+            if response.status_code != 200:
+                print(f"Failed to send heartbeat: {response.text}")
+        except requests.exceptions.RequestException as e:
+            print(f"Error communicating with server: {e}")
+        time.sleep(10)
 
 class FileEventHandler(FileSystemEventHandler):
     def on_modified(self, event):
@@ -418,6 +421,8 @@ def repl():
             console.print(f"[red]Error: {str(e)}[/red]")
 
 if __name__ == "__main__":
+    heartbeat_daemon = threading.Thread(target=send_heartbeat, daemon=True)
+    heartbeat_daemon.start()
     if not os.path.exists(downloads_dir):
         os.makedirs(downloads_dir)
         print(f"[green]Created directory: {downloads_dir}[/green]")
