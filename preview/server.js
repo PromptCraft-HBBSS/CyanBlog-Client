@@ -11,6 +11,7 @@ const docsDir = path.join(__dirname, "/../docs");
 let currentFilename = null;
 let lastHeartbeat = null;
 let clients = [];
+let isPythonActive = false;
 let fileWatcher = null;
 const HEARTBEAT_TIMEOUT = 30000; // 30s timeout
 
@@ -30,9 +31,11 @@ app.post("/register-filename", (req, res) => {
     }
 
     currentFilename = filename;
+    isPythonActive = true;
     lastHeartbeat = Date.now();
     console.log(`Registered filename: ${filename}`);
 
+    watchFile(); // Watch new file (if valid)
     res.json({ message: "Filename registered successfully" });
 });
 
@@ -43,9 +46,9 @@ app.get("/pointer", (req, res) => {
 
 // Get diary entry based on registered filename
 app.get("/entry", (req, res) => {
-    const timeout = Date.now() - lastHeartbeat
-    if (!currentFilename || timeout > HEARTBEAT_TIMEOUT) {
-        return res.status(503).send("<h1>Error: Python client is not running</h1>");
+    console.log("Python active:", isPythonActive);
+    if (!isPythonActive) {
+        return res.status(503).json({ error: "Python agent is not active." });
     }
 
     const filePath = path.join(docsDir, currentFilename, "entry.md");
@@ -77,22 +80,6 @@ app.get("/entry", (req, res) => {
     });
 });
 
-// Receive heartbeat from Python client
-app.post("/heartbeat", (req, res) => {
-    // if (!currentFilename) {
-    //     return res.status(400).json({ error: "No filename registered" });
-    // }
-
-    lastHeartbeat = Date.now();
-    console.log("Heartbeat received");
-
-    // Start file watching if not already started
-    if (!fileWatcher) {
-        startWatchingFile();
-    }
-
-    res.json({ message: "Heartbeat received" });
-});
 
 // SSE Endpoint: Listen for file changes
 app.get("/events", (req, res) => {
@@ -116,38 +103,46 @@ app.post("/refresh", (req, res) => {
     res.status(200).json({ message: "Refresh sent to all clients" });
 });
 
+// Periodic check for Python agent activity
+setInterval(() => {
+    if (lastHeartbeat && Date.now() - lastHeartbeat > 30000) {
+        console.log("Python agent timeout detected.", Date.now() - lastHeartbeat);
+        isPythonActive = false;
+    }
+}, 5000);
+
+// API: Receive heartbeat from Python agent
+app.post("/heartbeat", (req, res) => {
+    isPythonActive = true;
+    lastHeartbeat = Date.now();
+    res.json({ message: "Heartbeat received" });
+});
+
 // Notify clients of file changes
 function notifyClients() {
     clients.forEach(client => client.write("data: update\n\n"));
 }
 
-// Start watching file for changes
-function startWatchingFile() {
+// Watch the file for changes
+function watchFile() {
     if (!currentFilename) return;
-
     const filePath = path.join(docsDir, currentFilename, "entry.md");
-    if (!fs.existsSync(filePath)) return;
 
-    console.log(`Started watching file: ${filePath}`);
+    if (!fs.existsSync(filePath)) {
+        console.log(`File does not exist: ${filePath}`);
+        return;
+    }
 
-    fileWatcher = fs.watchFile(filePath, { interval: 1000 }, () => {
-        console.log(`File ${filePath} changed, notifying clients...`);
+    if (fileWatcher) {
+        fileWatcher.close(); // Stop watching previous file
+    }
+
+    console.log(`Watching file: ${filePath}`);
+    fileWatcher = fs.watch(filePath, () => {
+        console.log(`File changed: ${filePath}, notifying clients...`);
         notifyClients();
     });
 }
-
-// Check if heartbeat is lost
-setInterval(() => {
-    if (currentFilename && Date.now() - lastHeartbeat > HEARTBEAT_TIMEOUT) {
-        console.log("Python client inactive. Stopping file watching...");
-        currentFilename = null;
-        lastHeartbeat = null;
-        if (fileWatcher) {
-            fs.unwatchFile(path.join(docsDir, currentFilename, "entry.md"));
-            fileWatcher = null;
-        }
-    }
-}, 5000);
 
 // Start the server
 app.listen(PORT, () => {

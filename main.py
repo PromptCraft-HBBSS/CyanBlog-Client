@@ -77,6 +77,7 @@ class ObservablePointer:
 pointer = ObservablePointer(datetime.datetime.today().strftime('%Y-%m-%d'))
 
 def on_pointer_change(new_value):
+    refresh()
     register_filename()
     
 pointer.add_callback(on_pointer_change)
@@ -95,15 +96,16 @@ def heartbeat_daemon():
         time.sleep(10)
 
 # MARK: File watching
-
 class FileEventHandler(FileSystemEventHandler):
     def on_modified(self, event):
         register_filename()
+        refresh()
         if event.is_directory:
             return
         watched_file = os.path.join(docs_dir, pointer.value, 'entry.md')
         if event.src_path == watched_file:
             print(f"[yellow]File modified: {event.src_path}[/yellow]")
+            register_filename()
 
 def start_watcher():
     event_handler = FileEventHandler()
@@ -115,11 +117,12 @@ def start_watcher():
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
+        print('stopped')
         observer.stop()
     observer.join()
 
 def register_filename():
-    """Periodically send the current pointer to the Node.js server."""
+    """Send the current pointer to the Node.js server."""
     try:
         response = requests.post(f"{NODE_SERVER_URL}/register-filename", json={"filename": pointer.value})
         if response.status_code != 200:
