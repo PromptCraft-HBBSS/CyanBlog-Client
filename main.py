@@ -77,8 +77,14 @@ class ObservablePointer:
 pointer = ObservablePointer(datetime.datetime.today().strftime('%Y-%m-%d'))
 
 def on_pointer_change(new_value):
-    refresh()
-    register_filename()
+    global event_handler
+    try:
+        event_handler.update_target()
+        start_watcher()
+        refresh()
+        register_filename()
+    except Exception as e:
+        print(f"[red]Pointer change error: {str(e)}[/red]")
     
 pointer.add_callback(on_pointer_change)
 
@@ -97,29 +103,58 @@ def heartbeat_daemon():
 
 # MARK: File watching
 class FileEventHandler(FileSystemEventHandler):
+    def __init__(self):
+        super().__init__()
+        self.debounce_timer = None
+        self.current_target = self.normalize_path(
+            os.path.join(docs_dir, pointer.value, 'entry.md')
+        )
+
+    @staticmethod
+    def normalize_path(path):
+        return os.path.normcase(os.path.normpath(path))
+
+    def update_target(self):
+        self.current_target = self.normalize_path(
+            os.path.join(docs_dir, pointer.value, 'entry.md')
+        )
+
     def on_modified(self, event):
-        register_filename()
-        refresh()
         if event.is_directory:
             return
-        watched_file = os.path.join(docs_dir, pointer.value, 'entry.md')
-        if event.src_path == watched_file:
-            print(f"[yellow]File modified: {event.src_path}[/yellow]")
-            register_filename()
+            
+        changed_path = self.normalize_path(event.src_path)
+        if changed_path == self.current_target:
+            if self.debounce_timer:
+                self.debounce_timer.cancel()
+                
+            self.debounce_timer = threading.Timer(0.5, self.handle_change)
+            self.debounce_timer.start()
+
+    def handle_change(self):
+        refresh()
+        register_filename()
+        
+# Global observer management
+observer = None
+event_handler = FileEventHandler()
 
 def start_watcher():
-    event_handler = FileEventHandler()
-    observer = Observer()
-    watched_file = os.path.join(docs_dir, pointer.value, 'entry.md')
-    observer.schedule(event_handler, watched_file, recursive=False)
-    observer.start()
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print('stopped')
+    global observer
+    # Stop existing observer if running
+    if observer and observer.is_alive():
         observer.stop()
-    observer.join()
+        observer.join()
+
+    # Start new observer
+    target_dir = os.path.dirname(event_handler.current_target)
+    if not os.path.exists(target_dir):
+        return
+        
+    observer = Observer()
+    observer.schedule(event_handler, target_dir, recursive=False)
+    observer.start()
+    print(f"[cyan]Now watching: {event_handler.current_target}[/cyan]")
 
 def register_filename():
     """Send the current pointer to the Node.js server."""
@@ -436,8 +471,7 @@ def handle_command(user_input):
     register_filename()
 
 def repl():
-    watcher_thread = threading.Thread(target=start_watcher, daemon=True)
-    watcher_thread.start()
+    start_watcher()
     while True:
         try:
             user_input = input(f"cyanblog ({pointer.value}) +++> ")
@@ -454,8 +488,8 @@ def repl():
 # MARK: App entrance
 
 if __name__ == "__main__":
-    heartbeat_daemon = threading.Thread(target=heartbeat_daemon, daemon=True)
-    heartbeat_daemon.start()
+    hb_thread = threading.Thread(target=heartbeat_daemon, daemon=True)
+    hb_thread.start()
     if not os.path.exists(downloads_dir):
         os.makedirs(downloads_dir)
         print(f"[green]Created directory: {downloads_dir}[/green]")
