@@ -1,4 +1,14 @@
 #!/opt/anaconda3/envs/cyan-client/bin/python
+# cyanblog client
+# Config:
+#   - .env:
+#       - PULL_KEY: X-API-KEY header field for viewing locked docs.
+#       - PUSH_KEY: X-API-KEY header field for publishing/updating locked docs.
+#       - DELETE_KEY: X-API-KEY header field for deleting docs from server.
+#
+# PromptCraft, 2025. All rights reserved.
+
+import platform
 import random
 import os
 import re
@@ -10,10 +20,15 @@ import time
 import threading
 import requests
 import datetime
+if platform.system() == "Windows":
+    import pyreadline3 as readline
+else:
+    import readline
 from dotenv import load_dotenv
-from rich.console import Console
+from rich import print
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
 
 # Specify absolute path
 dotenv_path = "/Users/makabaka1880/Documents/2025/dev/cyan-client/.env"
@@ -36,8 +51,8 @@ PUSH_API_KEY = os.getenv("PUSH_KEY")
 PULL_API_KEY = os.getenv("PULL_KEY")
 DELETE_API_KEY = os.getenv("DELETE_KEY")
 
-# Create a console object to handle output
-console = Console()
+readline.set_history_length(1000)
+readline.parse_and_bind('tab: complete')
 
 # Observable pointer class to track the current diary entry
 class ObservablePointer:
@@ -47,7 +62,7 @@ class ObservablePointer:
         
     def add_callback(self, callback):
         self._callbacks.append(callback)
-        
+
     @property
     def value(self):
         return self._value
@@ -60,15 +75,26 @@ class ObservablePointer:
 
 # Create observable pointer with initial value as today's date.
 pointer = ObservablePointer(datetime.datetime.today().strftime('%Y-%m-%d'))
+
+def on_pointer_change(new_value):
+    register_filename()
+    
+pointer.add_callback(on_pointer_change)
+
 def send_heartbeat():
+    response = requests.post(f"{NODE_SERVER_URL}/heartbeat")
+    if response.status_code != 200:
+        print(f"Failed to send heartbeat: {response.text}")
+            
+def heartbeat_daemon():
     while True:
         try:
-            response = requests.post(f"{NODE_SERVER_URL}/heartbeat")
-            if response.status_code != 200:
-                print(f"Failed to send heartbeat: {response.text}")
+            send_heartbeat()
         except requests.exceptions.RequestException as e:
             print(f"Error communicating with server: {e}")
         time.sleep(10)
+
+# MARK: File watching
 
 class FileEventHandler(FileSystemEventHandler):
     def on_modified(self, event):
@@ -77,9 +103,8 @@ class FileEventHandler(FileSystemEventHandler):
             return
         watched_file = os.path.join(docs_dir, pointer.value, 'entry.md')
         if event.src_path == watched_file:
-            console.print(f"[yellow]File modified: {event.src_path}[/yellow]")
+            print(f"[yellow]File modified: {event.src_path}[/yellow]")
 
-# Start monitoring pointer file
 def start_watcher():
     event_handler = FileEventHandler()
     observer = Observer()
@@ -101,7 +126,7 @@ def register_filename():
             print(f"Failed to register pointer: {response.text}")
     except requests.exceptions.RequestException as e:
         if e.contains("refused"):
-            console.print("[red]Error: Node.js server not running. Please start the server first.[/red]")
+            print("[red]Error: Node.js server not running. Please start the server first.[/red]")
         else:
             print(f"Error communicating with server: {e}")
 
@@ -109,10 +134,10 @@ def add_asset(path):
     """Add an asset to the current entry."""
     path = path.replace('\\ ', ' ')
     if not pointer.value:
-        console.print("[red]Error: Pointer not set. Use 'set' command to set the pointer.[/red]")
+        print("[red]Error: Pointer not set. Use 'set' command to set the pointer.[/red]")
         return
     if not os.path.exists(path):
-        console.print(f"[red]Error: Asset not found at '{path}'[/red]")
+        print(f"[red]Error: Asset not found at '{path}'[/red]")
         return
     
     ext = os.path.splitext(path)[-1]
@@ -120,8 +145,8 @@ def add_asset(path):
     unique_filename = f"{name}{ext}"
     dest = os.path.join(docs_dir, pointer.value, 'assets', unique_filename)
     shutil.copyfile(path, dest)
-    console.print(f"[green]Asset '{path}' added successfully to '{pointer.value}'[/green]")
-    console.print(f"[blue]Markdown usage: !\[{path.split('/')[-1]}](/docs/{pointer.value}/assets/{unique_filename})[/blue]")
+    print(f"[green]Asset '{path}' added successfully to '{pointer.value}'[/green]")
+    print(f"[blue]Markdown usage: !\[{path.split('/')[-1]}](/docs/{pointer.value}/assets/{unique_filename})[/blue]")
     
 def resolve_file(file):
     """
@@ -173,15 +198,12 @@ def send_event(event):
     except requests.exceptions.RequestException as e:
         print(f"Error communicating with server: {e}")
 
-def on_pointer_change(new_value):
-    register_filename()
-    
-pointer.add_callback(on_pointer_change)
+# MARK: REPL Commands
 
 def submit_entry(file=None):
     file = resolve_file(file)
     try:
-        with open(os.path.join(docs_dir, file, 'entry.md'), "r") as f:
+        with open(os.path.join(docs_dir, file, 'entry.md'), "r", encoding='utf-8') as f:
             contents = f.read()
         payload = {
             "filename": file,
@@ -190,24 +212,24 @@ def submit_entry(file=None):
         headers = {"x-api-key": PUSH_API_KEY}
         response = requests.post(POST_API_URL, json=payload, headers=headers)
         if response.status_code == 201:
-            console.print(f"[green]Entry '{file}' submitted successfully![/green]")
+            print(f"[green]Entry '{file}' submitted successfully![/green]")
         else:
-            console.print(f"[red]Failed to submit entry ({response.status_code}): {response.text}[/red]")
+            print(f"[red]Failed to submit entry ({response.status_code}): {response.text}[/red]")
     except Exception as e:
-        console.print(f"[red]Error submitting entry: {str(e)}[/red]")
+        print(f"[red]Error submitting entry: {str(e)}[/red]")
 
 def list_entries(limit=None):
     req = LIST_API_URL + "?limit=" + str(limit if limit else 10)
     response = requests.get(req)
-    console.print(response.json())
+    print(response.json())
     
 def delete_entry(file):
     file = resolve_file(file)
     response = requests.post(DELETE_API_URL, json={"f": file}, headers={"x-api-key": DELETE_API_KEY})
     if response.status_code == 200:
-        console.print(f"[green]Entry '{file}' deleted successfully![/green]")
+        print(f"[green]Entry '{file}' deleted successfully![/green]")
     else:
-        console.print(f"[red]Failed to delete entry ({response.status_code}): {response.text}[/red]")
+        print(f"[red]Failed to delete entry ({response.status_code}): {response.text}[/red]")
     
 def update_entry(file=None):
     file = resolve_file(file)
@@ -218,11 +240,11 @@ def update_entry(file=None):
         headers = {"x-api-key": PUSH_API_KEY}
         response = requests.post(UPDATE_API_URL, json=payload, headers=headers)
         if response.status_code == 201:
-            console.print(f"[yellow]Entry '{file}' updated successfully![/yellow]")
+            print(f"[yellow]Entry '{file}' updated successfully![/yellow]")
         else:
-            console.print(f"[red]Failed to update entry ({response.status_code}): {response.text}[/red]")
+            print(f"[red]Failed to update entry ({response.status_code}): {response.text}[/red]")
     except Exception as e:
-        console.print(f"[red]Error updating entry: {str(e)}[/red]")
+        print(f"[red]Error updating entry: {str(e)}[/red]")
 
 def pull_entry(file=None):
     file = resolve_file(file)
@@ -235,24 +257,24 @@ def pull_entry(file=None):
             directory = os.path.dirname(entry_path)
             if not os.path.exists(directory):
                 os.makedirs(directory)
-                console.print(f"[blue]Created directory: {directory}[/blue]")
-            with open(entry_path, "w") as f:
+                print(f"[blue]Created directory: {directory}[/blue]")
+            with open(entry_path, "w", encoding='utf-8') as f:
                 f.write(raw_data)
-            console.print(f"[blue]Entry saved as {file}.md in 'docs' directory[/blue]")
+            print(f"[blue]Entry saved as {file}.md in 'docs' directory[/blue]")
         else:
-            console.print(f"[red]Failed to fetch entry ({response.status_code}): {response.text}[/red]")
+            print(f"[red]Failed to fetch entry ({response.status_code}): {response.text}[/red]")
     except Exception as e:
-        console.print(f"[red]Error fetching entry: {str(e)}[/red]")
+        print(f"[red]Error fetching entry: {str(e)}[/red]")
 
 def edit_entry(file=None):
     file = resolve_file(file)
     try:
-        console.print(f"[blue]Opening {file}.md in vim editor...[/blue]")
+        print(f"[blue]Opening {file}.md in vim editor...[/blue]")
         subprocess.run(["vim", os.path.join(docs_dir, file, 'entry.md')])
     except FileNotFoundError:
-        console.print("[red]Error: vim is not installed or not found.[/red]")
+        print("[red]Error: vim is not installed or not found.[/red]")
     except Exception as e:
-        console.print(f"[red]Error opening editor: {str(e)}[/red]")
+        print(f"[red]Error opening editor: {str(e)}[/red]")
 
 def set_pointer(new_pointer):
     global pointer
@@ -260,15 +282,15 @@ def set_pointer(new_pointer):
     pointer.value = resolve_file(new_pointer)
     entry_path = os.path.join(docs_dir, pointer.value, 'entry.md')
     if not os.path.exists(entry_path):
-        console.print(f"[red]Warning: '{entry_path}' does not exist! You may want to create or pull the entry.[/red]")
+        print(f"[red]Warning: '{entry_path}' does not exist! You may want to create or pull the entry.[/red]")
     else:
-        console.print(f"[cyan]Pointer set to {pointer.value}.[/cyan]")
+        print(f"[cyan]Pointer set to {pointer.value}.[/cyan]")
 
 def upload_assets(file=None):
     file = resolve_file(file)
     assets_dir = os.path.join(docs_dir, file, 'assets')
     if not os.path.exists(assets_dir):
-        console.print(f"[red]Assets directory for '{file}' does not exist.[/red]")
+        print(f"[red]Assets directory for '{file}' does not exist.[/red]")
         return
     zip_filename = f"{assets_dir}.zip"
     with zipfile.ZipFile(zip_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -282,11 +304,11 @@ def upload_assets(file=None):
         try:
             response = requests.post(f"{UPLOAD_API_URL}/{file}", files=files_payload, headers=headers)
             if response.status_code == 200:
-                console.print(f"[green]Assets successfully uploaded to '{file}'[/green]")
+                print(f"[green]Assets successfully uploaded to '{file}'[/green]")
             else:
-                console.print(f"[red]Failed to upload assets: {response.status_code}, {response.text}[/red]")
+                print(f"[red]Failed to upload assets: {response.status_code}, {response.text}[/red]")
         except Exception as e:
-            console.print(f"[red]Error uploading zip file: {str(e)}[/red]")
+            print(f"[red]Error uploading zip file: {str(e)}[/red]")
     os.remove(zip_filename)
 
 def download_assets(file=None):
@@ -298,44 +320,47 @@ def download_assets(file=None):
         if response.status_code == 200:
             with open(zip_filename, 'wb') as f:
                 f.write(response.content)
-            console.print(f"[green]Assets successfully downloaded as '{zip_filename}'[/green]")
+            print(f"[green]Assets successfully downloaded as '{zip_filename}'[/green]")
             assets_dir = os.path.join(docs_dir, file, 'assets')
             if not os.path.exists(assets_dir):
                 os.makedirs(assets_dir)
-                console.print(f"[green]Created assets directory at '{assets_dir}'[/green]")
+                print(f"[green]Created assets directory at '{assets_dir}'[/green]")
             with zipfile.ZipFile(zip_filename, 'r') as zip_ref:
                 zip_ref.extractall(assets_dir)
-                console.print(f"[green]Assets successfully unarchived into '{assets_dir}'[/green]")
+                print(f"[green]Assets successfully unarchived into '{assets_dir}'[/green]")
             os.remove(zip_filename)
-            console.print(f"[green]Removed the zip file '{zip_filename}' after extraction.[/green]")
+            print(f"[green]Removed the zip file '{zip_filename}' after extraction.[/green]")
         else:
-            console.print(f"[red]Failed to download assets: {response.status_code}, {response.text}[/red]")
+            print(f"[red]Failed to download assets: {response.status_code}, {response.text}[/red]")
     except Exception as e:
-        console.print(f"[red]Error downloading assets: {str(e)}[/red]")
+        print(f"[red]Error downloading assets: {str(e)}[/red]")
 
 def create_entry(name):
     name = resolve_file(name)
     entry_path = os.path.join(docs_dir, name, 'entry.md')
     if os.path.exists(entry_path):
-        console.print(f"[red]Entry '{name}' already exists![/red]")
+        print(f"[red]Entry '{name}' already exists![/red]")
     else:
         if not os.path.exists(os.path.dirname(entry_path)):
             os.makedirs(os.path.dirname(entry_path))
             os.makedirs(os.path.join(os.path.dirname(entry_path), 'assets'))
-            console.print(f"[blue]Created directory: {os.path.dirname(entry_path)}[/blue]")
-        with open(entry_path, "w") as f:
+            print(f"[blue]Created directory: {os.path.dirname(entry_path)}[/blue]")
+        with open(entry_path, "w", encoding='utf-8') as f:
             f.write(f"""---
 title: "{name}"
 dateline: {datetime.datetime.today().strftime('%Y-%m-%d')}
 locked: true
 password: "B3stP@ssw0rd"
 ---""")
-        console.print(f"[blue]Entry '{name}' created successfully![/blue]")
-        console.print(f"[blue]You can now edit the entry using the 'edit' command.[/blue]")
+        print(f"[blue]Entry '{name}' created successfully![/blue]")
+        print(f"[blue]You can now edit the entry using the 'edit' command.[/blue]")
 
 def refresh():
+    send_heartbeat()
     register_filename()
     requests.post(f"{NODE_SERVER_URL}/refresh")
+
+# MARK: Handle REPL commands
 
 def handle_command(user_input):
     register_filename()
@@ -343,7 +368,7 @@ def handle_command(user_input):
     command = parts[0].lower()
     file_arg = parts[1].strip() if len(parts) > 1 else None
     if command == "exit":
-        console.print("[yellow]Exiting...[/yellow]")
+        print("[yellow]Exiting...[/yellow]")
         quit()
     elif command == "add":
         add_asset(file_arg)
@@ -360,17 +385,20 @@ def handle_command(user_input):
         edit_entry(file=file_arg)
         refresh()
     elif command == "ls":
-        os.system(f"ls {docs_dir}")
+        if platform.system() == 'windows':
+            os.system(f"dir {docs_dir}")
+        else:
+            os.system(f"ls {docs_dir}")
     elif command == "file":
         if file_arg:
             set_pointer(file_arg)
         else:
-            console.print("[red]Usage: file <filename>[/red]")
+            print("[red]Usage: file <filename>[/red]")
         refresh()
     elif command == "rm":
         target = resolve_file(file_arg) if file_arg else pointer.value
         os.system(f"rm -rf {docs_dir}{target}")
-        console.print(f"[red]Removed directory: {docs_dir}{target}[/red]")
+        print(f"[red]Removed directory: {docs_dir}{target}[/red]")
         refresh()
     elif command == "del":
         target = resolve_file(file_arg) if file_arg else pointer.value
@@ -381,7 +409,7 @@ def handle_command(user_input):
             create_entry(file_arg)
             pointer.value = resolve_file(file_arg)
         else:
-            console.print("[red]Usage: new <filename>[/red]")
+            print("[red]Usage: new <filename>[/red]")
         refresh()
     elif command == "list":
         if file_arg:
@@ -397,11 +425,11 @@ def handle_command(user_input):
         download_assets(file=file_arg)
         refresh()
     elif command == "help":
-        console.print("[cyan]Commands: submit, update, pull, edit, ls, file, rm, del, new, list, refresh, upload, download, help, exit[/cyan]")
+        print("[cyan]Commands: submit, update, pull, edit, ls, file, rm, del, new, list, refresh, upload, download, help, exit[/cyan]")
     elif command == "":
         pass
     else:
-        console.print(f"[red]Unknown command: {user_input}[/red]")
+        print(f"[red]Unknown command: {user_input}[/red]")
     register_filename()
 
 def repl():
@@ -414,14 +442,16 @@ def repl():
             for cmd in commands:
                 handle_command(cmd)
         except KeyboardInterrupt:
-            console.print("[yellow]Use 'exit' command to quit.[/yellow]")
+            print("[yellow]Use 'exit' command to quit.[/yellow]")
         except EOFError:
-            console.print("[yellow]Use 'exit' command to quit.[/yellow]")
+            print("[yellow]Use 'exit' command to quit.[/yellow]")
         except Exception as e:
-            console.print(f"[red]Error: {str(e)}[/red]")
+            print(f"[red]Error: {str(e)}[/red]")
+
+# MARK: App entrance
 
 if __name__ == "__main__":
-    heartbeat_daemon = threading.Thread(target=send_heartbeat, daemon=True)
+    heartbeat_daemon = threading.Thread(target=heartbeat_daemon, daemon=True)
     heartbeat_daemon.start()
     if not os.path.exists(downloads_dir):
         os.makedirs(downloads_dir)

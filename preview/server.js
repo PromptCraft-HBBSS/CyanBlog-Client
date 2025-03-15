@@ -43,7 +43,8 @@ app.get("/pointer", (req, res) => {
 
 // Get diary entry based on registered filename
 app.get("/entry", (req, res) => {
-    if (!currentFilename || Date.now() - lastHeartbeat > HEARTBEAT_TIMEOUT) {
+    const timeout = Date.now() - lastHeartbeat
+    if (!currentFilename || timeout > HEARTBEAT_TIMEOUT) {
         return res.status(503).send("<h1>Error: Python client is not running</h1>");
     }
 
@@ -78,9 +79,9 @@ app.get("/entry", (req, res) => {
 
 // Receive heartbeat from Python client
 app.post("/heartbeat", (req, res) => {
-    if (!currentFilename) {
-        return res.status(400).json({ error: "No filename registered" });
-    }
+    // if (!currentFilename) {
+    //     return res.status(400).json({ error: "No filename registered" });
+    // }
 
     lastHeartbeat = Date.now();
     console.log("Heartbeat received");

@@ -39,19 +39,26 @@
 
 .section-block img {
     height: 50vh;
+    text-align: center;
+}
+    
+.section-block img {
     display: block;
     margin: 0 auto;
+    max-width: 100%;
+    height: auto;
 }
 
-.section-block img::after {
-    content: attr(alt); /* Use the alt text as the caption */
+/* Add caption under images */
+.section-block:has(img)::after {
+    content: attr(alt);
     display: block;
     text-align: center;
     font-size: 14px;
     color: gray;
     margin-top: 5px;
 }
-
+    
 blockquote {
     position: relative;
     margin: 1em 0;
