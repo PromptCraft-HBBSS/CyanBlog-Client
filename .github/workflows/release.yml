@@ -1,0 +1,88 @@
+name: Build and Release on Main Push
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            target_os: linux
+            ext: ""
+          - os: macos-latest
+            target_os: macos
+            ext: ""
+          - os: windows-latest
+            target_os: windows
+            ext: ".exe"
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
+    - name: Install Linux Dependencies
+      if: matrix.target_os == 'linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev  # 解决图形库依赖
+
+    - name: Install Python Packages
+      run: |
+        pip install -r requirements.txt pyinstaller
+
+    - name: Run PyInstaller
+      run: |
+        # 直接在工作流中执行编译命令
+        pyinstaller \
+          --onefile \
+          --name "cyan_${{ matrix.target_os }}${{ matrix.ext }}" \
+          --distpath "./dist/${{ matrix.target_os }}" \
+          main.py
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries-${{ matrix.target_os }}
+        path: dist/${{ matrix.target_os }}
+
+  aggregate:
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.generate-tag.outputs.tag }}
+    steps:
+    - name: Generate Dynamic Tag
+      id: generate-tag
+      run: |
+        TAG_NAME="nightly-$(date +%Y%m%d-%H%M)-${GITHUB_SHA:0:7}"
+        echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+
+  release:
+    needs: [build, aggregate]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Create Unified Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ needs.aggregate.outputs.tag }}
+        name: "Nightly Build (${{ needs.aggregate.outputs.tag }})"
+        body: "Multi-platform auto-generated release"
+        prerelease: true
+        files: |
+          artifacts/**/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
