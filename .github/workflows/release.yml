@@ -1,9 +1,11 @@
-name: Build and Release on Main Push
+name: Build and Release
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths:
+      - '**.py'
+      - 'requirements.txt'
 
 jobs:
   build:
@@ -15,74 +17,64 @@ jobs:
           - os: ubuntu-latest
             target_os: linux
             ext: ""
+            shell: bash
           - os: macos-latest
             target_os: macos
             ext: ""
+            shell: bash
           - os: windows-latest
             target_os: windows
             ext: ".exe"
+            shell: pwsh
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.10"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
 
-    - name: Install Linux Dependencies
-      if: matrix.target_os == 'linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libgl1-mesa-dev  # 解决图形库依赖
+      - name: Handle Linux Dependencies
+        if: matrix.target_os == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev
 
-    - name: Install Python Packages
-      run: |
-        pip install -r requirements.txt pyinstaller
+      - name: Install Requirements
+        run: pip install -r requirements.txt pyinstaller
 
-    - name: Run PyInstaller
-      run: |
-        # 直接在工作流中执行编译命令
-        pyinstaller \
-          --onefile \
-          --name "cyan_${{ matrix.target_os }}${{ matrix.ext }}" \
-          --distpath "./dist/${{ matrix.target_os }}" \
-          main.py
+      - name: Build Executable
+        shell: ${{ matrix.shell }}
+        # 单行命令避免续行符问题
+        run: pyinstaller --onefile --name "cyan_${{ matrix.target_os }}${{ matrix.ext }}" --distpath "./dist/${{ matrix.target_os }}" main.py
 
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: binaries-${{ matrix.target_os }}
-        path: dist/${{ matrix.target_os }}
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target_os }}
+          path: dist/${{ matrix.target_os }}
 
-  aggregate:
+  create-release:
     needs: build
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.generate-tag.outputs.tag }}
     steps:
-    - name: Generate Dynamic Tag
-      id: generate-tag
-      run: |
-        TAG_NAME="nightly-$(date +%Y%m%d-%H%M)-${GITHUB_SHA:0:7}"
-        echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-  release:
-    needs: [build, aggregate]
-    runs-on: ubuntu-latest
-    steps:
-    - name: Download All Artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
+      - name: Generate Release Tag
+        id: tag
+        run: |
+          COMMIT_SHA_SHORT=$(echo $GITHUB_SHA | cut -c1-7)
+          echo "TAG_NAME=release-$(date +%Y%m%d%H%M)-$COMMIT_SHA_SHORT" >> $GITHUB_ENV
 
-    - name: Create Unified Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ needs.aggregate.outputs.tag }}
-        name: "Nightly Build (${{ needs.aggregate.outputs.tag }})"
-        body: "Multi-platform auto-generated release"
-        prerelease: true
-        files: |
-          artifacts/**/*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "Multi-Platform Build (${{ env.TAG_NAME }})"
+          body: "Automated build for Windows, Linux and macOS"
+          prerelease: false
+          files: |
+            artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
